@@ -24,50 +24,42 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Prepare Google Cloud SQL Proxy Credentials
+      shell: bash
+      run: |
+        # Create directory in GITHUB_WORKSPACE
+        mkdir -p $GITHUB_WORKSPACE/gce-cloudsql-proxy
+        echo '${{ inputs.creds }}' > $GITHUB_WORKSPACE/gce-cloudsql-proxy/key.json
+        chmod 600 $GITHUB_WORKSPACE/gce-cloudsql-proxy/key.json
+
     - name: Start Google Cloud SQL Proxy
       shell: bash
       run: |
-        # Define the new credentials path
-        PROXY_PATH="$GITHUB_WORKSPACE/gce-cloudsql-proxy"
-        
-        # Ensure directory exists with correct permissions
-        mkdir -p $PROXY_PATH
-        chmod 755 $PROXY_PATH  # Ensure directory is readable
-        
-        # Write the Google Cloud credentials to a JSON file
-        echo '${{ inputs.creds }}' > $PROXY_PATH/key.json
-        chmod 644 $PROXY_PATH/key.json  # Ensure file is readable
-        
-        # Debugging: Check file ownership and permissions
-        ls -lah $PROXY_PATH
-        stat $PROXY_PATH/key.json
-        
-        # Start the Cloud SQL Proxy container with correct permissions
+        # Start container with the mounted GITHUB_WORKSPACE path
         docker run -d --net host --name gce-cloudsql-proxy --restart on-failure \
-        --user $(id -u):$(id -g) \  # Run as the same user as the host
-        -v $PROXY_PATH:/cloudsql-creds \
+        -v $GITHUB_WORKSPACE/gce-cloudsql-proxy:/cloudsql-creds \
         gcr.io/cloudsql-docker/gce-proxy:${{ inputs.proxy_version }} \
         /cloud_sql_proxy \
           -credential_file /cloudsql-creds/key.json \
           -dir /cloudsql-creds \
-          -instances="${{ inputs.instance }}=tcp:127.0.0.1:${{ inputs.port }}"  # ✅ FIXED
+          -instances=${{ inputs.instance }}=tcp:127.0.0.1:${{ inputs.port }}
 
         # Wait until connections are accepted
         sleep 3
         isready=0
         for i in {1..10}; do
           echo "Wait for connections to be ready ... $i/10"
-          (${{ github.action_path }}/wait-for-it.sh --quiet --timeout=3 --host=127.0.0.1 --port=${{ inputs.port }} || exit $?) && true # escape bash's pipefail
+          (${{ github.action_path }}/wait-for-it.sh --quiet --timeout=3 --host=127.0.0.1 --port=${{ inputs.port }} || exit $?) && true
           isready=$?
           if [[ $isready -eq 0 ]]; then
             break
           fi
           sleep 2
         done
-        
-        # Print container logs for debugging
+
+        # Print container logs
         docker logs gce-cloudsql-proxy
-        
+
         # Exit with error code if we couldn't connect
         if [[ $isready -ne 0 ]]; then
           exit $isready 
