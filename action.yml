@@ -36,15 +36,21 @@ runs:
         # Define the new credentials path
         PROXY_PATH="$GITHUB_WORKSPACE/gce-cloudsql-proxy"
 
-        # Ensure directory exists
+        # Ensure directory exists with correct permissions
         mkdir -p $PROXY_PATH
+        chmod 755 $PROXY_PATH  # Ensure directory is readable
 
         # Write the Google Cloud credentials to a JSON file
         echo '${{ inputs.creds }}' > $PROXY_PATH/key.json
-        chmod 600 $PROXY_PATH/key.json
+        chmod 644 $PROXY_PATH/key.json  # Ensure file is readable
 
-        # Start the Cloud SQL Proxy container
+        # Debugging: Check file ownership and permissions
+        ls -lah $PROXY_PATH
+        stat $PROXY_PATH/key.json
+
+        # Start the Cloud SQL Proxy container with user permissions
         docker run -d --net host --name gce-cloudsql-proxy --restart on-failure \
+        --user $(id -u):$(id -g) \  # Run as the same user as the host
         -v $PROXY_PATH:/cloudsql-creds \
         gcr.io/cloudsql-docker/gce-proxy:${{ inputs.proxy_version }} \
         /cloud_sql_proxy \
