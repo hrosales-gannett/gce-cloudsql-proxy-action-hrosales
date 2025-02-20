@@ -24,23 +24,35 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Set GCP Credentials Path
+      shell: bash
+      run: |
+        export PROXY_PATH="$GITHUB_WORKSPACE/gce-cloudsql-proxy"
+        echo "PROXY_PATH=$PROXY_PATH" >> $GITHUB_ENV
+
     - name: Start Google Cloud SQL Proxy
       shell: bash
       run: |
-        # write google application credentials to a temporary file to be used inside the container
-        mkdir -p /tmp/gce-cloudsql-proxy
-        echo '${{ inputs.creds }}' > /tmp/gce-cloudsql-proxy/key.json
+        # Define the new credentials path
+        PROXY_PATH="$GITHUB_WORKSPACE/gce-cloudsql-proxy"
 
-        # start container
+        # Ensure directory exists
+        mkdir -p $PROXY_PATH
+
+        # Write the Google Cloud credentials to a JSON file
+        echo '${{ inputs.creds }}' > $PROXY_PATH/key.json
+        chmod 600 $PROXY_PATH/key.json
+
+        # Start the Cloud SQL Proxy container
         docker run -d --net host --name gce-cloudsql-proxy --restart on-failure \
-        -v /tmp/gce-cloudsql-proxy:/tmp/gce-cloudsql-proxy \
+        -v $PROXY_PATH:/cloudsql-creds \
         gcr.io/cloudsql-docker/gce-proxy:${{ inputs.proxy_version }} \
         /cloud_sql_proxy \
-          -credential_file /tmp/gce-cloudsql-proxy/key.json \
-          -dir /tmp \
+          -credential_file /cloudsql-creds/key.json \
+          -dir /cloudsql-creds \
           -instances=${{ inputs.instance }}=tcp:127.0.0.1:${{ inputs.port }}
 
-        # wait until connections are accepted
+        # Wait until connections are accepted
         sleep 3
         isready=0
         for i in {1..10}; do
@@ -53,10 +65,10 @@ runs:
           sleep 2
         done
 
-        # print container logs
+        # Print container logs for debugging
         docker logs gce-cloudsql-proxy
 
-        # exit with error code if we couldn't connect
+        # Exit with error code if we couldn't connect
         if [[ $isready -ne 0 ]]; then
           exit $isready 
         fi
